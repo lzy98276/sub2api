@@ -1,0 +1,39 @@
+name: Inspect Sub2API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect Sub2API containers
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            echo "Sub2API-like containers:"
+            docker ps -a --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}' | sed -n '1p;/sub2api/p;/sub2/p'
+
+            for name in sub2api2 sub2api2-postgres sub2api2-redis sub2api sub2api-postgres sub2api-redis; do
+              if docker inspect "${name}" >/dev/null 2>&1; then
+                echo ""
+                echo "=== ${name} ==="
+                docker inspect -f 'image={{.Config.Image}}' "${name}"
+                docker inspect -f 'project={{ index .Config.Labels "com.docker.compose.project" }}' "${name}" 2>/dev/null || true
+                docker inspect -f 'service={{ index .Config.Labels "com.docker.compose.service" }}' "${name}" 2>/dev/null || true
+                docker inspect -f 'working_dir={{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "${name}" 2>/dev/null || true
+                docker inspect -f 'config_files={{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${name}" 2>/dev/null || true
+                docker inspect -f 'mounts={{ range .Mounts }}{{ .Name }}:{{ .Destination }} {{ end }}' "${name}"
+                docker inspect -f 'ports={{ json .NetworkSettings.Ports }}' "${name}"
+              fi
+            done
