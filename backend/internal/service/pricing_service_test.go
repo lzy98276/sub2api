@@ -174,6 +174,30 @@ func TestGetModelPricing_ImageModelDoesNotFallbackToTextModel(t *testing.T) {
 	require.Same(t, imagePricing, got)
 }
 
+func TestGetModelPricing_GrokModelUsesXAIProviderPricing(t *testing.T) {
+	grokPricing := &LiteLLMModelPricing{LiteLLMProvider: "xai", InputCostPerToken: 3e-6}
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"xai/grok-4-0709": grokPricing,
+		},
+	}
+
+	got := svc.GetModelPricing("grok-4-0709")
+	require.Same(t, grokPricing, got)
+}
+
+func TestGetModelPricing_GrokDatedVariantFallsBackToXAIProviderBase(t *testing.T) {
+	grokPricing := &LiteLLMModelPricing{LiteLLMProvider: "xai", InputCostPerToken: 3e-6}
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"xai/grok-3-mini": grokPricing,
+		},
+	}
+
+	got := svc.GetModelPricing("grok-3-mini-20250219")
+	require.Same(t, grokPricing, got)
+}
+
 func TestParsePricingData_PreservesPriorityAndServiceTierFields(t *testing.T) {
 	raw := map[string]any{
 		"gpt-5.4": map[string]any{

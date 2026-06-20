@@ -1,0 +1,130 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --build-arg COMMIT="${GITHUB_SHA}" \
+            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t sub2api:latest \
+            .
+
+      - name: Prepare deploy bundle
+        run: |
+          mkdir -p deploy-bundle
+          docker save sub2api:latest | gzip > deploy-bundle/sub2api-image.tar.gz
+          cp deploy/docker-compose.yml deploy-bundle/docker-compose.yml
+          cp deploy/docker-compose.ci.yml deploy-bundle/docker-compose.ci.yml
+          cat > deploy-bundle/deploy.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/sub2api}"
+          RELEASE_SHA="${RELEASE_SHA:-manual}"
+          BUNDLE_DIR="${BUNDLE_DIR:-/tmp/sub2api-${RELEASE_SHA}}"
+          RELEASE_DIR="${DEPLOY_PATH}/releases/${RELEASE_SHA}"
+
+          ensure_docker() {
+            if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+              return
+            fi
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y docker.io docker-compose-plugin gzip openssl
+            systemctl enable --now docker || true
+          }
+
+          rand_hex() {
+            openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+          }
+
+          compose() {
+            if docker compose version >/dev/null 2>&1; then
+              docker compose "$@"
+            else
+              docker-compose "$@"
+            fi
+          }
+
+          ensure_docker
+
+          mkdir -p "${RELEASE_DIR}"
+          cp "${BUNDLE_DIR}/sub2api-image.tar.gz" "${RELEASE_DIR}/sub2api-image.tar.gz"
+          cp "${BUNDLE_DIR}/docker-compose.yml" "${DEPLOY_PATH}/docker-compose.yml"
+          cp "${BUNDLE_DIR}/docker-compose.ci.yml" "${DEPLOY_PATH}/docker-compose.ci.yml"
+
+          cd "${DEPLOY_PATH}"
+
+          if [ ! -f .env ]; then
+            cat > .env <<ENVEOF
+          BIND_HOST=0.0.0.0
+          SERVER_PORT=8080
+          SERVER_MODE=release
+          RUN_MODE=standard
+          TZ=Asia/Shanghai
+          POSTGRES_USER=sub2api
+          POSTGRES_PASSWORD=$(rand_hex)
+          POSTGRES_DB=sub2api
+          REDIS_PASSWORD=
+          REDIS_DB=0
+          ADMIN_EMAIL=admin@sub2api.local
+          ADMIN_PASSWORD=
+          JWT_SECRET=$(rand_hex)
+          TOTP_ENCRYPTION_KEY=$(rand_hex)
+          LOG_LEVEL=info
+          LOG_FORMAT=console
+          LOG_SERVICE_NAME=sub2api
+          LOG_ENV=production
+          ENVEOF
+            chmod 600 .env
+          fi
+
+          docker load -i "${RELEASE_DIR}/sub2api-image.tar.gz"
+          compose -f docker-compose.yml -f docker-compose.ci.yml --env-file .env up -d
+          compose -f docker-compose.yml -f docker-compose.ci.yml --env-file .env ps
+          docker image prune -f >/dev/null || true
+          EOF
+          chmod +x deploy-bundle/deploy.sh
+
+      - name: Upload bundle to server
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: deploy-bundle/*
+          target: /tmp/sub2api-${{ github.sha }}
+          strip_components: 1
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          script: |
+            export DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+            export RELEASE_SHA="${{ github.sha }}"
+            export BUNDLE_DIR="/tmp/sub2api-${{ github.sha }}"
+            bash "/tmp/sub2api-${{ github.sha }}/deploy.sh"

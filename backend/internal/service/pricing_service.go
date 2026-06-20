@@ -573,6 +573,9 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	if strings.HasPrefix(lookupCandidates[0], "gpt-") {
 		return s.matchOpenAIModel(lookupCandidates[0])
 	}
+	if strings.HasPrefix(lookupCandidates[0], "grok-") {
+		return s.matchXAIModel(lookupCandidates[0])
+	}
 
 	return nil
 }
@@ -844,6 +847,31 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 }
 
 // generateOpenAIModelVariants 生成 OpenAI 模型的回退变体列表
+func (s *PricingService) matchXAIModel(model string) *LiteLLMModelPricing {
+	candidates := []string{model}
+	if !strings.HasPrefix(model, "xai/") {
+		candidates = append(candidates, "xai/"+model)
+	}
+	for _, candidate := range candidates {
+		if pricing, ok := s.pricingData[candidate]; ok {
+			return pricing
+		}
+	}
+
+	baseName := s.extractBaseName(strings.TrimPrefix(model, "xai/"))
+	for key, pricing := range s.pricingData {
+		if strings.ToLower(pricing.LiteLLMProvider) != "xai" {
+			continue
+		}
+		keyModel := strings.TrimPrefix(strings.ToLower(key), "xai/")
+		if s.extractBaseName(keyModel) == baseName {
+			logger.LegacyPrintf("service.pricing", "[Pricing] xAI fallback matched %s -> %s", model, key)
+			return pricing
+		}
+	}
+	return nil
+}
+
 func (s *PricingService) generateOpenAIModelVariants(model string, datePattern *regexp.Regexp) []string {
 	seen := make(map[string]bool)
 	var variants []string

@@ -1,10 +1,12 @@
 package routes
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -83,7 +85,8 @@ func RegisterGatewayRoutes(
 		gateway.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			if isOpenAICompatibleGroupPlatform(getGroupPlatform(c)) {
+				forcePlatformForCurrentGroup(c)
 				h.OpenAIGateway.ChatCompletions(c)
 				return
 			}
@@ -165,7 +168,8 @@ func RegisterGatewayRoutes(
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformOpenAI {
+		if isOpenAICompatibleGroupPlatform(getGroupPlatform(c)) {
+			forcePlatformForCurrentGroup(c)
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
@@ -253,4 +257,18 @@ func getGroupPlatform(c *gin.Context) string {
 		return ""
 	}
 	return apiKey.Group.Platform
+}
+
+func isOpenAICompatibleGroupPlatform(platform string) bool {
+	return platform == service.PlatformOpenAI || platform == service.PlatformXAI
+}
+
+func forcePlatformForCurrentGroup(c *gin.Context) {
+	platform := getGroupPlatform(c)
+	if platform == "" || platform == service.PlatformOpenAI {
+		return
+	}
+	ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, platform)
+	c.Request = c.Request.WithContext(ctx)
+	c.Set(string(middleware.ContextKeyForcePlatform), platform)
 }

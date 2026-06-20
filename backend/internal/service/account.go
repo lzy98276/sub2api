@@ -1052,6 +1052,14 @@ func (a *Account) IsOpenAI() bool {
 	return a.Platform == PlatformOpenAI
 }
 
+func (a *Account) IsXAI() bool {
+	return a.Platform == PlatformXAI
+}
+
+func (a *Account) IsOpenAICompatible() bool {
+	return a.IsOpenAI() || a.IsXAI()
+}
+
 func (a *Account) IsAnthropic() bool {
 	return a.Platform == PlatformAnthropic
 }
@@ -1064,8 +1072,12 @@ func (a *Account) IsOpenAIApiKey() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeAPIKey
 }
 
+func (a *Account) IsOpenAICompatibleAPIKey() bool {
+	return a.IsOpenAICompatible() && a.Type == AccountTypeAPIKey
+}
+
 func (a *Account) GetOpenAIBaseURL() string {
-	if !a.IsOpenAI() {
+	if !a.IsOpenAICompatible() {
 		return ""
 	}
 	if a.Type == AccountTypeAPIKey {
@@ -1073,6 +1085,9 @@ func (a *Account) GetOpenAIBaseURL() string {
 		if baseURL != "" {
 			return baseURL
 		}
+	}
+	if a.IsXAI() {
+		return "https://api.x.ai"
 	}
 	return "https://api.openai.com"
 }
@@ -1099,7 +1114,7 @@ func (a *Account) GetOpenAIIDToken() string {
 }
 
 func (a *Account) GetOpenAIApiKey() string {
-	if !a.IsOpenAIApiKey() {
+	if !a.IsOpenAICompatibleAPIKey() {
 		return ""
 	}
 	return a.GetCredential("api_key")
@@ -1140,13 +1155,16 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if capability == "" {
 		return true
 	}
-	if !a.IsOpenAI() {
+	if !a.IsOpenAICompatible() {
 		return false
 	}
 	switch capability {
 	case OpenAIEndpointCapabilityChatCompletions:
+		if a.IsXAI() && a.Type != AccountTypeAPIKey {
+			return false
+		}
 	case OpenAIEndpointCapabilityEmbeddings:
-		if a.Type != AccountTypeAPIKey {
+		if a.Type != AccountTypeAPIKey || a.IsXAI() {
 			return false
 		}
 	default:
