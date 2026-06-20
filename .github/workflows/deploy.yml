@@ -1,9 +1,6 @@
 name: Build and Deploy
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -83,7 +80,7 @@ jobs:
           if [ ! -f .env ]; then
             cat > .env <<ENVEOF
           BIND_HOST=0.0.0.0
-          SERVER_PORT=8080
+          SERVER_PORT=18080
           SERVER_MODE=release
           RUN_MODE=standard
           TZ=Asia/Shanghai
@@ -102,6 +99,12 @@ jobs:
           LOG_ENV=production
           ENVEOF
             chmod 600 .env
+          fi
+
+          if grep -q '^SERVER_PORT=' .env; then
+            sed -i 's/^SERVER_PORT=.*/SERVER_PORT=18080/' .env
+          else
+            printf '\nSERVER_PORT=18080\n' >> .env
           fi
 
           docker load -i "${RELEASE_DIR}/sub2api-image.tar.gz"

@@ -1,0 +1,58 @@
+name: Restore Site Entrypoint
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore reverse proxy on server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            echo "Stopping sub2api containers that currently own the public port..."
+            docker rm -f sub2api 2>/dev/null || true
+
+            echo "Searching for Appwrite compose files..."
+            candidates="$(find /opt /root /home -maxdepth 6 \( -name 'docker-compose.yml' -o -name 'compose.yml' -o -name 'docker-compose.yaml' -o -name 'compose.yaml' \) 2>/dev/null | while read -r f; do grep -q 'appwrite-traefik' "$f" && echo "$f"; done)"
+            echo "${candidates}"
+
+            compose_file="$(printf '%s\n' "${candidates}" | head -n1)"
+            if [ -z "${compose_file}" ]; then
+              echo "Could not find an Appwrite compose file containing appwrite-traefik."
+              docker ps -a --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
+              exit 1
+            fi
+
+            compose_dir="$(dirname "${compose_file}")"
+            echo "Using Appwrite compose file: ${compose_file}"
+            cd "${compose_dir}"
+
+            service="$(awk '
+              /^[[:space:]]{2}[A-Za-z0-9_.-]+:$/ { gsub(":", "", $1); current=$1 }
+              /container_name:[[:space:]]*appwrite-traefik/ { print current; exit }
+            ' "${compose_file}")"
+            if [ -z "${service}" ]; then
+              echo "Could not identify the compose service for container appwrite-traefik."
+              exit 1
+            fi
+
+            echo "Restoring service ${service} for container appwrite-traefik..."
+            if docker compose version >/dev/null 2>&1; then
+              docker compose -f "${compose_file}" up -d "${service}"
+            else
+              docker-compose -f "${compose_file}" up -d "${service}"
+            fi
+
+            docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Ports}}\t{{.Status}}' | sed -n '1p;/appwrite-traefik/p;/sub2api/p'
