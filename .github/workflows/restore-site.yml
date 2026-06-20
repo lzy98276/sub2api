@@ -19,40 +19,84 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT }}
           command_timeout: 10m
           script: |
-            set -euo pipefail
+            set -uo pipefail
 
             echo "Stopping sub2api containers that currently own the public port..."
             docker rm -f sub2api 2>/dev/null || true
 
-            echo "Searching for Appwrite compose files..."
-            candidates="$(find /opt /root /home -maxdepth 6 \( -name 'docker-compose.yml' -o -name 'compose.yml' -o -name 'docker-compose.yaml' -o -name 'compose.yaml' \) 2>/dev/null | while read -r f; do grep -q 'appwrite-traefik' "$f" && echo "$f"; done)"
-            echo "${candidates}"
+            echo "Reading Appwrite compose labels from existing containers..."
+            project=""
+            workdir=""
+            config_files=""
+            for container in appwrite appwrite-console appwrite-worker-certificates appwrite-realtime; do
+              if docker inspect "${container}" >/dev/null 2>&1; then
+                project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "${container}" 2>/dev/null || true)"
+                workdir="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "${container}" 2>/dev/null || true)"
+                config_files="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${container}" 2>/dev/null || true)"
+                if [ -n "${workdir}" ] && [ -n "${config_files}" ]; then
+                  break
+                fi
+              fi
+            done
 
-            compose_file="$(printf '%s\n' "${candidates}" | head -n1)"
-            if [ -z "${compose_file}" ]; then
-              echo "Could not find an Appwrite compose file containing appwrite-traefik."
+            if [ -z "${workdir}" ] || [ -z "${config_files}" ]; then
+              echo "Could not read Appwrite compose labels."
               docker ps -a --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
               exit 1
             fi
 
-            compose_dir="$(dirname "${compose_file}")"
-            echo "Using Appwrite compose file: ${compose_file}"
-            cd "${compose_dir}"
+            echo "Using Appwrite compose project: ${project}"
+            echo "Using Appwrite compose working directory: ${workdir}"
+            echo "Using Appwrite compose config files: ${config_files}"
+            cd "${workdir}"
 
-            service="$(awk '
-              /^[[:space:]]{2}[A-Za-z0-9_.-]+:$/ { gsub(":", "", $1); current=$1 }
-              /container_name:[[:space:]]*appwrite-traefik/ { print current; exit }
-            ' "${compose_file}")"
+            compose_args=()
+            compose_paths=()
+            old_ifs="${IFS}"
+            IFS=','
+            for file in ${config_files}; do
+              IFS="${old_ifs}"
+              if [ "${file#/}" = "${file}" ]; then
+                file="${workdir}/${file}"
+              fi
+              compose_args+=("-f" "${file}")
+              compose_paths+=("${file}")
+              IFS=','
+            done
+            IFS="${old_ifs}"
+
+            service=""
+            for file in "${compose_paths[@]}"; do
+              service="$(awk '
+                /^[[:space:]]{2}[A-Za-z0-9_.-]+:$/ { gsub(":", "", $1); current=$1 }
+                /container_name:[[:space:]]*appwrite-traefik/ { print current; exit }
+              ' "${file}")"
+              if [ -n "${service}" ]; then
+                break
+              fi
+            done
             if [ -z "${service}" ]; then
-              echo "Could not identify the compose service for container appwrite-traefik."
-              exit 1
+              service="traefik"
+              echo "Could not identify service by container_name; trying service '${service}'."
             fi
 
-            echo "Restoring service ${service} for container appwrite-traefik..."
+            project_args=()
+            if [ -n "${project}" ]; then
+              project_args=("-p" "${project}")
+            fi
+
+            echo "Restoring Appwrite service ${service}..."
             if docker compose version >/dev/null 2>&1; then
-              docker compose -f "${compose_file}" up -d "${service}"
+              docker compose "${project_args[@]}" "${compose_args[@]}" up -d "${service}"
+              docker compose "${project_args[@]}" "${compose_args[@]}" ps "${service}"
             else
-              docker-compose -f "${compose_file}" up -d "${service}"
+              docker-compose "${project_args[@]}" "${compose_args[@]}" up -d "${service}"
+              docker-compose "${project_args[@]}" "${compose_args[@]}" ps "${service}"
+            fi
+
+            if ! docker ps --format '{{.Names}}' | grep -Fxq appwrite-traefik; then
+              echo "appwrite-traefik is still not running."
+              exit 1
             fi
 
             docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Ports}}\t{{.Status}}' | sed -n '1p;/appwrite-traefik/p;/sub2api/p'

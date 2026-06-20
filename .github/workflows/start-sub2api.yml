@@ -1,0 +1,74 @@
+name: Start Sub2API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start Sub2API on server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+            DEPLOY_PATH="${DEPLOY_PATH:-/opt/sub2api}"
+            cd "${DEPLOY_PATH}"
+
+            if [ ! -f .env ]; then
+              cat > .env <<'ENVEOF'
+            BIND_HOST=0.0.0.0
+            SERVER_PORT=18080
+            SERVER_MODE=release
+            RUN_MODE=standard
+            TZ=Asia/Shanghai
+            POSTGRES_USER=sub2api
+            POSTGRES_PASSWORD=sub2api
+            POSTGRES_DB=sub2api
+            REDIS_PASSWORD=
+            REDIS_DB=0
+            ADMIN_EMAIL=admin@sub2api.local
+            ADMIN_PASSWORD=
+            JWT_SECRET=sub2api-change-me
+            TOTP_ENCRYPTION_KEY=sub2api-change-me
+            LOG_LEVEL=info
+            LOG_FORMAT=console
+            LOG_SERVICE_NAME=sub2api
+            LOG_ENV=production
+            ENVEOF
+            fi
+
+            if grep -q '^SERVER_PORT=' .env; then
+              sed -i 's/^SERVER_PORT=.*/SERVER_PORT=18080/' .env
+            else
+              printf '\nSERVER_PORT=18080\n' >> .env
+            fi
+
+            if [ ! -f docker-compose.yml ] || [ ! -f docker-compose.ci.yml ]; then
+              echo "Missing /opt/sub2api docker compose files."
+              ls -la
+              exit 1
+            fi
+
+            docker rm -f sub2api 2>/dev/null || true
+
+            if docker compose version >/dev/null 2>&1; then
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml --env-file .env up -d postgres redis sub2api
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml --env-file .env ps
+            else
+              docker-compose -f docker-compose.yml -f docker-compose.ci.yml --env-file .env up -d postgres redis sub2api
+              docker-compose -f docker-compose.yml -f docker-compose.ci.yml --env-file .env ps
+            fi
+
+            sleep 5
+            curl -fsS http://127.0.0.1:18080/health
