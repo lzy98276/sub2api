@@ -1,0 +1,108 @@
+name: Update Original Sub2API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --build-arg COMMIT="${GITHUB_SHA}" \
+            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t sub2api:latest \
+            .
+
+      - name: Prepare update bundle
+        run: |
+          mkdir -p update-bundle
+          docker save sub2api:latest | gzip > update-bundle/sub2api-image.tar.gz
+          cat > update-bundle/update-original-sub2api.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          ORIGINAL_CONTAINER="${ORIGINAL_CONTAINER:-sub2api2}"
+          BUNDLE_DIR="${BUNDLE_DIR:-/tmp/sub2api-update}"
+
+          if ! docker inspect "${ORIGINAL_CONTAINER}" >/dev/null 2>&1; then
+            echo "Original Sub2API container ${ORIGINAL_CONTAINER} was not found."
+            exit 1
+          fi
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "${ORIGINAL_CONTAINER}")"
+          workdir="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "${ORIGINAL_CONTAINER}")"
+          config_files="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${ORIGINAL_CONTAINER}")"
+          service="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "${ORIGINAL_CONTAINER}")"
+
+          if [ -z "${project}" ] || [ -z "${workdir}" ] || [ -z "${config_files}" ] || [ -z "${service}" ]; then
+            echo "Missing Docker Compose labels on ${ORIGINAL_CONTAINER}."
+            exit 1
+          fi
+
+          cd "${workdir}"
+          docker load -i "${BUNDLE_DIR}/sub2api-image.tar.gz"
+
+          cat > docker-compose.codex-update.yml <<YAMLEOF
+          services:
+            ${service}:
+              image: sub2api:latest
+          YAMLEOF
+
+          compose_args=()
+          old_ifs="${IFS}"
+          IFS=','
+          for file in ${config_files}; do
+            IFS="${old_ifs}"
+            if [ "${file#/}" = "${file}" ]; then
+              file="${workdir}/${file}"
+            fi
+            compose_args+=("-f" "${file}")
+            IFS=','
+          done
+          IFS="${old_ifs}"
+          compose_args+=("-f" "${workdir}/docker-compose.codex-update.yml")
+
+          if docker compose version >/dev/null 2>&1; then
+            docker compose -p "${project}" "${compose_args[@]}" up -d "${service}"
+            docker compose -p "${project}" "${compose_args[@]}" ps "${service}"
+          else
+            docker-compose -p "${project}" "${compose_args[@]}" up -d "${service}"
+            docker-compose -p "${project}" "${compose_args[@]}" ps "${service}"
+          fi
+
+          host_port="$(docker inspect -f '{{ (index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort }}' "${ORIGINAL_CONTAINER}")"
+          curl -fsS "http://127.0.0.1:${host_port}/health"
+          EOF
+          chmod +x update-bundle/update-original-sub2api.sh
+
+      - name: Upload update bundle
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: update-bundle/*
+          target: /tmp/sub2api-update-${{ github.sha }}
+          strip_components: 1
+
+      - name: Update original Sub2API service
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: 10m
+          script: |
+            export ORIGINAL_CONTAINER="sub2api2"
+            export BUNDLE_DIR="/tmp/sub2api-update-${{ github.sha }}"
+            bash "/tmp/sub2api-update-${{ github.sha }}/update-original-sub2api.sh"
