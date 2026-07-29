@@ -383,10 +383,22 @@ type ChannelUsageFields struct {
 
 // SupportedModel 渠道的一个支持模型条目（无通配符、可直接展示给用户）
 type SupportedModel struct {
-	Name     string               // 用户侧模型名
-	Platform string               // 所属平台
-	Pricing  *ChannelModelPricing // 定价详情（nil 表示未配置定价）
+	Name          string                      // 用户侧模型名
+	Platform      string                      // 所属平台
+	Pricing       *ChannelModelPricing        // 定价详情（nil 表示未配置定价）
+	PricingSource SupportedModelPricingSource // 仅供聚合展示时选择价格优先级，不对外暴露
 }
+
+// PricingSource distinguishes channel-defined pricing from the display-only
+// LiteLLM USD fallback. A channel-defined price must win when the same model
+// is reachable through more than one channel.
+type SupportedModelPricingSource string
+
+const (
+	SupportedModelPricingSourceNone    SupportedModelPricingSource = ""
+	SupportedModelPricingSourceCatalog SupportedModelPricingSource = "catalog"
+	SupportedModelPricingSourceChannel SupportedModelPricingSource = "channel"
+)
 
 // wildcardSuffix 是模型模式中的通配符后缀标记（仅支持尾部匹配）。
 const wildcardSuffix = "*"
@@ -527,10 +539,15 @@ func (c *Channel) SupportedModels() []SupportedModel {
 			return
 		}
 		seen[key] = struct{}{}
+		pricingSource := SupportedModelPricingSourceNone
+		if !pricingNeedsFallback(pricing) {
+			pricingSource = SupportedModelPricingSourceChannel
+		}
 		result = append(result, SupportedModel{
-			Name:     displayName,
-			Platform: platform,
-			Pricing:  pricing,
+			Name:          displayName,
+			Platform:      platform,
+			Pricing:       pricing,
+			PricingSource: pricingSource,
 		})
 	}
 
