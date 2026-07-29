@@ -1,0 +1,60 @@
+name: Sync upstream sub2api
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure committer
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream without replacing marketplace code
+        env:
+          UPSTREAM_REPOSITORY: https://github.com/Wei-Shaw/sub2api.git
+        run: |
+          git remote add upstream "$UPSTREAM_REPOSITORY" 2>/dev/null || git remote set-url upstream "$UPSTREAM_REPOSITORY"
+          git fetch upstream main
+          git merge --no-ff --no-commit -X ours upstream/main
+
+          # These files are owned by this fork. Restore them after a successful
+          # merge so a future upstream change cannot replace the marketplace.
+          git restore --source=HEAD --staged --worktree -- \
+            .github/workflows/sync-upstream.yml \
+            backend/internal/handler/available_channel_handler.go \
+            backend/internal/handler/available_channel_handler_test.go \
+            backend/internal/server/routes/user.go \
+            backend/internal/service/channel.go \
+            backend/internal/service/channel_available.go \
+            frontend/src/api/modelMarketplace.ts \
+            frontend/src/components/layout/AppSidebar.vue \
+            frontend/src/i18n/locales/en.ts \
+            frontend/src/i18n/locales/zh.ts \
+            frontend/src/router/index.ts \
+            frontend/src/views/user/ModelMarketplaceView.vue
+
+          if git diff --cached --quiet; then
+            echo "Upstream is already synchronized."
+            exit 0
+          fi
+
+          git commit -m "chore: sync upstream sub2api"
+          git push origin HEAD:main
