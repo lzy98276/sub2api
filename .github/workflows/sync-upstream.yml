@@ -33,7 +33,17 @@ jobs:
         run: |
           git remote add upstream "$UPSTREAM_REPOSITORY" 2>/dev/null || git remote set-url upstream "$UPSTREAM_REPOSITORY"
           git fetch upstream main
-          git merge --no-ff --no-commit -X ours upstream/main
+          if ! git merge --no-ff --no-commit -X ours upstream/main; then
+            # Preserve the fork's version only for unresolved paths. Other
+            # upstream changes remain part of this merge commit.
+            if git ls-files --unmerged | grep -q .; then
+              git checkout --ours -- .
+              git add -A
+            else
+              echo "Upstream merge failed before conflicts could be resolved."
+              exit 1
+            fi
+          fi
 
           # These files are owned by this fork. Restore them after a successful
           # merge so a future upstream change cannot replace the marketplace.
