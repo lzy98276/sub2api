@@ -389,6 +389,7 @@ export default {
     groups: 'Groups',
     channels: 'Channels',
     availableChannels: 'Available Channels',
+    modelMarketplace: 'Model Marketplace',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     proxies: 'Proxies',
@@ -1103,6 +1104,31 @@ export default {
       unitPerMillion: '/ 1M tokens',
       unitPerRequest: '/ request'
     }
+  },
+
+  modelMarketplace: {
+    title: 'Model Marketplace',
+    description: 'Browse accessible models, groups, and USD pricing',
+    searchPlaceholder: 'Search models, providers, or groups...',
+    providerFilter: 'Filter providers',
+    allProviders: 'All providers',
+    refresh: 'Refresh manually',
+    retry: 'Retry',
+    empty: 'No models match the current filters',
+    loadFailed: 'Unable to load model pricing',
+    availableGroups: 'Available groups',
+    tokenPricing: 'Token pricing',
+    requestPricing: 'Per-request pricing',
+    imagePricing: 'Per-image pricing',
+    input: 'Input',
+    output: 'Output',
+    cacheWrite: 'Cache write',
+    cacheRead: 'Cache read',
+    perRequest: 'Per request',
+    perImage: 'Per image',
+    imageOutput: 'Image output',
+    priceTier: 'Pricing tier',
+    noPricing: 'Pricing unavailable'
   },
 
   affiliate: {
