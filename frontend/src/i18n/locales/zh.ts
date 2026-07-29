@@ -389,6 +389,7 @@ export default {
     groups: '分组管理',
     channels: '渠道管理',
     availableChannels: '可用渠道',
+    modelMarketplace: '模型广场',
     subscriptions: '订阅管理',
     accounts: '账号管理',
     proxies: 'IP管理',
@@ -1107,6 +1108,31 @@ export default {
       unitPerMillion: '/ 1M token',
       unitPerRequest: '/ 次'
     }
+  },
+
+  modelMarketplace: {
+    title: '模型广场',
+    description: '查看可用模型、所属分组与美元定价',
+    searchPlaceholder: '搜索模型、厂商或分组...',
+    providerFilter: '筛选模型厂商',
+    allProviders: '全部厂商',
+    refresh: '手动刷新',
+    retry: '重新加载',
+    empty: '没有匹配的模型',
+    loadFailed: '模型价格加载失败',
+    availableGroups: '可用分组',
+    tokenPricing: 'Token 计费',
+    requestPricing: '按次计费',
+    imagePricing: '按图片计费',
+    input: '输入',
+    output: '输出',
+    cacheWrite: '缓存写入',
+    cacheRead: '缓存读取',
+    perRequest: '每次请求',
+    perImage: '每张图片',
+    imageOutput: '图片输出',
+    priceTier: '价格档位',
+    noPricing: '暂无定价'
   },
 
   affiliate: {
