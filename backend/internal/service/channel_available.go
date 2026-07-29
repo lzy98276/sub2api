@@ -123,6 +123,7 @@ func (s *ChannelService) fillGlobalPricingFallback(models []SupportedModel) {
 			continue
 		}
 		models[i].Pricing = synthesizePricingFromLiteLLM(lp, models[i].Pricing)
+		models[i].PricingSource = SupportedModelPricingSourceCatalog
 	}
 }
 
