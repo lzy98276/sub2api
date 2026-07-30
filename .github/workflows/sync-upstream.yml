@@ -27,17 +27,51 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Merge upstream without replacing marketplace code
         env:
           UPSTREAM_REPOSITORY: https://github.com/Wei-Shaw/sub2api.git
         run: |
+          is_fork_owned_path() {
+            case "$1" in
+              .github/workflows/* | \
+              backend/internal/handler/available_channel_handler.go | \
+              backend/internal/handler/available_channel_handler_test.go | \
+              backend/internal/server/routes/user.go | \
+              backend/internal/service/channel.go | \
+              backend/internal/service/channel_available.go | \
+              backend/internal/service/update_service.go | \
+              backend/internal/service/update_service_repository_test.go | \
+              deploy/update-fork.sh | \
+              frontend/src/api/modelMarketplace.ts | \
+              frontend/src/components/layout/AppSidebar.vue | \
+              frontend/src/components/layout/AuthLayout.vue | \
+              frontend/src/i18n/locales/en.ts | \
+              frontend/src/i18n/locales/zh.ts | \
+              frontend/src/router/index.ts | \
+              frontend/src/views/HomeView.vue | \
+              frontend/src/views/user/ModelMarketplaceView.vue)
+                return 0
+                ;;
+            esac
+            return 1
+          }
+
           git remote add upstream "$UPSTREAM_REPOSITORY" 2>/dev/null || git remote set-url upstream "$UPSTREAM_REPOSITORY"
           git fetch upstream main
-          if ! git merge --no-ff --no-commit -X ours upstream/main; then
-            # Preserve the fork's version only for unresolved paths. Other
-            # upstream changes remain part of this merge commit.
+          if ! git merge --no-ff --no-commit upstream/main; then
             if git ls-files --unmerged | grep -q .; then
-              git checkout --ours -- .
+              while IFS= read -r path; do
+                if is_fork_owned_path "$path"; then
+                  git checkout --ours -- "$path"
+                else
+                  git checkout --theirs -- "$path"
+                fi
+              done < <(git diff --name-only --diff-filter=U)
               git add -A
             else
               echo "Upstream merge failed before conflicts could be resolved."
@@ -45,10 +79,9 @@ jobs:
             fi
           fi
 
-          # Workflows are owned by this fork. Keeping them also avoids trying to
-          # push upstream workflow files with the default GitHub Actions token.
-          # The remaining paths implement the marketplace and are restored after
-          # a merge so upstream cannot replace them.
+          # Preserve only this fork's intentionally customized files. Workflows
+          # stay local because the default Actions token cannot push workflow
+          # files imported from an upstream repository.
           git restore --source=HEAD --staged --worktree -- \
             .github/workflows \
             backend/internal/handler/available_channel_handler.go \
@@ -56,17 +89,28 @@ jobs:
             backend/internal/server/routes/user.go \
             backend/internal/service/channel.go \
             backend/internal/service/channel_available.go \
+            backend/internal/service/update_service.go \
+            backend/internal/service/update_service_repository_test.go \
+            deploy/update-fork.sh \
             frontend/src/api/modelMarketplace.ts \
             frontend/src/components/layout/AppSidebar.vue \
+            frontend/src/components/layout/AuthLayout.vue \
             frontend/src/i18n/locales/en.ts \
             frontend/src/i18n/locales/zh.ts \
             frontend/src/router/index.ts \
+            frontend/src/views/HomeView.vue \
             frontend/src/views/user/ModelMarketplaceView.vue
 
           if git diff --cached --quiet; then
             echo "Upstream is already synchronized."
             exit 0
           fi
+
+          corepack enable
+          pushd frontend
+          pnpm install --frozen-lockfile
+          pnpm run build
+          popd
 
           git commit -m "chore: sync upstream sub2api"
           git push origin HEAD:main
