@@ -45,10 +45,12 @@ jobs:
             fi
           fi
 
-          # These files are owned by this fork. Restore them after a successful
-          # merge so a future upstream change cannot replace the marketplace.
+          # Workflows are owned by this fork. Keeping them also avoids trying to
+          # push upstream workflow files with the default GitHub Actions token.
+          # The remaining paths implement the marketplace and are restored after
+          # a merge so upstream cannot replace them.
           git restore --source=HEAD --staged --worktree -- \
-            .github/workflows/sync-upstream.yml \
+            .github/workflows \
             backend/internal/handler/available_channel_handler.go \
             backend/internal/handler/available_channel_handler_test.go \
             backend/internal/server/routes/user.go \
