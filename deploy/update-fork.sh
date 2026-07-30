@@ -102,7 +102,7 @@ tar -xzf "$ARCHIVE" -C "$SOURCE_DIR" --strip-components=1
 BUILD_TAG="$(date -u +%Y%m%d%H%M%S)"
 IMAGE="sub2api-fork:$BUILD_TAG"
 echo "Building $IMAGE"
-docker build --pull --tag "$IMAGE" --tag sub2api-fork:main "$SOURCE_DIR"
+docker build --quiet --pull --tag "$IMAGE" --tag sub2api-fork:main "$SOURCE_DIR"
 
 if grep -q '^    image: weishaw/sub2api:latest$' "$COMPOSE_FILE"; then
   sed -i 's|^    image: weishaw/sub2api:latest$|    image: ${SUB2API_IMAGE:-sub2api-fork:main}|' "$COMPOSE_FILE"
