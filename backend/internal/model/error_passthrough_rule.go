@@ -37,6 +37,7 @@ const (
 	PlatformXAI         = "xai"
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
+	PlatformGrok        = "grok"
 )
 
 // AllPlatforms 返回所有支持的平台列表
