@@ -28,7 +28,9 @@ var (
 const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
-	githubRepo     = "Wei-Shaw/sub2api"
+
+	defaultGitHubRepo    = "lzy98276/sub2api"
+	updateRepositoryEnv  = "UPDATE_GITHUB_REPOSITORY"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -44,8 +46,7 @@ type UpdateCache interface {
 	SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error
 }
 
-// GitHubReleaseClient 获取 GitHub release 信息的接口
-type GitHubReleaseClient interface {
+// GitHubReleaseClient 鑾峰彇 GitHub release 淇℃伅鐨勬帴鍙?type GitHubReleaseClient interface {
 	FetchLatestRelease(ctx context.Context, repo string) (*GitHubRelease, error)
 	DownloadFile(ctx context.Context, url, dest string, maxSize int64) error
 	FetchChecksumFile(ctx context.Context, url string) ([]byte, error)
@@ -280,7 +281,12 @@ func (s *UpdateService) Rollback() error {
 }
 
 func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, error) {
-	release, err := s.githubClient.FetchLatestRelease(ctx, githubRepo)
+	repository, err := resolveUpdateRepository()
+	if err != nil {
+		return nil, err
+	}
+
+	release, err := s.githubClient.FetchLatestRelease(ctx, repository)
 	if err != nil {
 		return nil, err
 	}
@@ -310,6 +316,38 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 		Cached:    false,
 		BuildType: s.buildType,
 	}, nil
+}
+
+func resolveUpdateRepository() (string, error) {
+	repository := strings.TrimSpace(os.Getenv(updateRepositoryEnv))
+	if repository == "" {
+		return defaultGitHubRepo, nil
+	}
+
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 || !isGitHubRepositoryPart(parts[0]) || !isGitHubRepositoryPart(parts[1]) {
+		return "", fmt.Errorf("%s must be an owner/repository value", updateRepositoryEnv)
+	}
+
+	return repository, nil
+}
+
+func isGitHubRepositoryPart(part string) bool {
+	if part == "" {
+		return false
+	}
+
+	for _, char := range part {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+
+	return true
 }
 
 func (s *UpdateService) downloadFile(ctx context.Context, downloadURL, dest string) error {
