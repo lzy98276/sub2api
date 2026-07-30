@@ -7,7 +7,7 @@ COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yml"
 REPOSITORY="${SUB2API_REPOSITORY:-lzy98276/sub2api}"
 REVISION="${1:-${SUB2API_REF:-main}}"
 BACKUP_ROOT="${SUB2API_BACKUP_DIR:-/root/sub2api-backups}"
-LOCK_DIR="/var/lock/sub2api-fork-update.lock"
+LOCK_FILE="/var/lock/sub2api-fork-update.lock"
 WORK_DIR=""
 PREVIOUS_IMAGE=""
 DEPLOYMENT_STARTED=false
@@ -27,12 +27,13 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   exit 2
 fi
 
-if ! command -v docker >/dev/null || ! command -v curl >/dev/null || ! command -v tar >/dev/null; then
-  echo "docker, curl, and tar are required." >&2
+if ! command -v docker >/dev/null || ! command -v curl >/dev/null || ! command -v tar >/dev/null || ! command -v flock >/dev/null; then
+  echo "docker, curl, tar, and flock are required." >&2
   exit 2
 fi
 
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
   echo "Another Sub2API update is already running." >&2
   exit 1
 fi
@@ -58,7 +59,6 @@ cleanup() {
   if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
     rm -rf "$WORK_DIR"
   fi
-  rmdir "$LOCK_DIR" 2>/dev/null || true
   exit "$status"
 }
 
