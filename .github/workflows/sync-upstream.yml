@@ -96,6 +96,24 @@ jobs:
             frontend/src/views/HomeView.vue \
             frontend/src/views/user/ModelMarketplaceView.vue
 
+          # Upstream renamed xai to grok while a few maintained components still
+          # accept the legacy value. Keep the upstream type file, adding only the
+          # compatibility literal required for the frontend type check.
+          node <<'NODE'
+          const fs = require('node:fs')
+          const file = 'frontend/src/types/index.ts'
+          let source = fs.readFileSync(file, 'utf8')
+          for (const typeName of ['GroupPlatform', 'AccountPlatform']) {
+            const pattern = new RegExp(`export type ${typeName} = [^\\n]+`)
+            const match = source.match(pattern)
+            if (match && !match[0].includes("'xai'")) {
+              source = source.replace(pattern, `${match[0]} | 'xai'`)
+            }
+          }
+          fs.writeFileSync(file, source)
+          NODE
+          git add frontend/src/types/index.ts
+
           if git diff --cached --quiet; then
             echo "Upstream is already synchronized."
             exit 0
