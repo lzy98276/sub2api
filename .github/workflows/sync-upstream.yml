@@ -36,20 +36,19 @@ jobs:
         env:
           UPSTREAM_REPOSITORY: https://github.com/Wei-Shaw/sub2api.git
         run: |
+          # Keep only the two fork features: the homepage and model marketplace.
+          # The marketplace also needs its route, navigation, translations, API,
+          # and server endpoint to remain functional after an upstream sync.
           is_fork_owned_path() {
             case "$1" in
-              .github/workflows/* | \
+              .github/workflows/sync-upstream.yml | \
               backend/internal/handler/available_channel_handler.go | \
               backend/internal/handler/available_channel_handler_test.go | \
               backend/internal/server/routes/user.go | \
               backend/internal/service/channel.go | \
               backend/internal/service/channel_available.go | \
-              backend/internal/service/update_service.go | \
-              backend/internal/service/update_service_repository_test.go | \
-              deploy/update-fork.sh | \
               frontend/src/api/modelMarketplace.ts | \
               frontend/src/components/layout/AppSidebar.vue | \
-              frontend/src/components/layout/AuthLayout.vue | \
               frontend/src/i18n/locales/en.ts | \
               frontend/src/i18n/locales/zh.ts | \
               frontend/src/router/index.ts | \
@@ -79,22 +78,18 @@ jobs:
             fi
           fi
 
-          # Preserve only this fork's intentionally customized files. Workflows
-          # stay local because the default Actions token cannot push workflow
-          # files imported from an upstream repository.
+          # Restore the fork files after a clean merge as well: Git only reports
+          # conflicts for overlapping paths, while files unique to this fork still
+          # need to survive a future upstream deletion.
           git restore --source=HEAD --staged --worktree -- \
-            .github/workflows \
+            .github/workflows/sync-upstream.yml \
             backend/internal/handler/available_channel_handler.go \
             backend/internal/handler/available_channel_handler_test.go \
             backend/internal/server/routes/user.go \
             backend/internal/service/channel.go \
             backend/internal/service/channel_available.go \
-            backend/internal/service/update_service.go \
-            backend/internal/service/update_service_repository_test.go \
-            deploy/update-fork.sh \
             frontend/src/api/modelMarketplace.ts \
             frontend/src/components/layout/AppSidebar.vue \
-            frontend/src/components/layout/AuthLayout.vue \
             frontend/src/i18n/locales/en.ts \
             frontend/src/i18n/locales/zh.ts \
             frontend/src/router/index.ts \
