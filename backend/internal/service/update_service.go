@@ -31,8 +31,8 @@ const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
 
-	defaultGitHubRepo    = "lzy98276/sub2api"
-	updateRepositoryEnv  = "UPDATE_GITHUB_REPOSITORY"
+	defaultGitHubRepo   = "lzy98276/sub2api"
+	updateRepositoryEnv = "UPDATE_GITHUB_REPOSITORY"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -53,7 +53,8 @@ type UpdateCache interface {
 	SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error
 }
 
-// GitHubReleaseClient 鑾峰彇 GitHub release 淇℃伅鐨勬帴鍙?type GitHubReleaseClient interface {
+// GitHubReleaseClient retrieves GitHub release information.
+type GitHubReleaseClient interface {
 	FetchLatestRelease(ctx context.Context, repo string) (*GitHubRelease, error)
 	FetchRecentReleases(ctx context.Context, repo string, perPage int) ([]*GitHubRelease, error)
 	DownloadFile(ctx context.Context, url, dest string, maxSize int64) error
