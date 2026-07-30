@@ -2,6 +2,7 @@ package handler
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -111,6 +112,31 @@ type userAvailableChannel struct {
 	Platforms   []userChannelPlatformSection `json:"platforms"`
 }
 
+// modelMarketplaceGroup is one visible group where a model can be used.
+// The multiplier is already resolved for the current user.
+type modelMarketplaceGroup struct {
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	Platform       string  `json:"platform"`
+	RateMultiplier float64 `json:"rate_multiplier"`
+}
+
+// modelMarketplaceModel keeps the marketplace at one card per model while
+// retaining every group in which that model is available.
+type modelMarketplaceModel struct {
+	Name     string                     `json:"name"`
+	Platform string                     `json:"platform"`
+	Provider string                     `json:"provider"`
+	Pricing  *userSupportedModelPricing `json:"pricing"`
+	Groups   []modelMarketplaceGroup    `json:"groups"`
+
+	pricingSource service.SupportedModelPricingSource
+}
+
+type modelMarketplaceResponse struct {
+	Models []modelMarketplaceModel `json:"models"`
+}
+
 // List 列出当前用户可见的「可用渠道」。
 // GET /api/v1/channels/available
 func (h *AvailableChannelHandler) List(c *gin.Context) {
@@ -136,7 +162,6 @@ func (h *AvailableChannelHandler) List(c *gin.Context) {
 	for i := range userGroups {
 		allowedGroupIDs[userGroups[i].ID] = struct{}{}
 	}
-
 	channels, err := h.channelService.ListAvailable(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -164,6 +189,174 @@ func (h *AvailableChannelHandler) List(c *gin.Context) {
 	}
 
 	response.Success(c, out)
+}
+
+// Marketplace returns a model-centric view of the user's accessible channel
+// configuration. Unlike List, this endpoint deliberately does not depend on
+// the available-channels feature flag: the marketplace is its own user page,
+// but it uses the exact same channel and pricing source of truth.
+// GET /api/v1/channels/model-marketplace
+func (h *AvailableChannelHandler) Marketplace(c *gin.Context) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	userGroups, err := h.apiKeyService.GetAvailableGroups(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	allowedGroupIDs := make(map[int64]struct{}, len(userGroups))
+	for i := range userGroups {
+		allowedGroupIDs[userGroups[i].ID] = struct{}{}
+	}
+	userGroupRates, err := h.apiKeyService.GetUserGroupRates(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	channels, err := h.channelService.ListAvailable(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, modelMarketplaceResponse{
+		Models: buildModelMarketplaceModels(channels, allowedGroupIDs, userGroupRates),
+	})
+}
+
+func buildModelMarketplaceModels(
+	channels []service.AvailableChannel,
+	allowedGroupIDs map[int64]struct{},
+	userGroupRates map[int64]float64,
+) []modelMarketplaceModel {
+	type modelKey struct {
+		platform string
+		name     string
+	}
+
+	models := make(map[modelKey]*modelMarketplaceModel)
+	groupIndexes := make(map[modelKey]map[int64]struct{})
+
+	for i := range channels {
+		channel := &channels[i]
+		if channel.Status != service.StatusActive {
+			continue
+		}
+
+		groupsByPlatform := make(map[string][]userAvailableGroup)
+		for _, group := range channel.Groups {
+			if _, allowed := allowedGroupIDs[group.ID]; !allowed || group.Platform == "" {
+				continue
+			}
+			rateMultiplier := group.RateMultiplier
+			if userRate, hasUserRate := userGroupRates[group.ID]; hasUserRate {
+				rateMultiplier = userRate
+			}
+			groupsByPlatform[group.Platform] = append(groupsByPlatform[group.Platform], userAvailableGroup{
+				ID:               group.ID,
+				Name:             group.Name,
+				Platform:         group.Platform,
+				SubscriptionType: group.SubscriptionType,
+				RateMultiplier:   rateMultiplier,
+				IsExclusive:      group.IsExclusive,
+			})
+		}
+
+		for _, supportedModel := range channel.SupportedModels {
+			groups := groupsByPlatform[supportedModel.Platform]
+			if len(groups) == 0 {
+				continue
+			}
+
+			key := modelKey{
+				platform: strings.ToLower(supportedModel.Platform),
+				name:     strings.ToLower(supportedModel.Name),
+			}
+			model, exists := models[key]
+			if !exists {
+				model = &modelMarketplaceModel{
+					Name:          supportedModel.Name,
+					Platform:      supportedModel.Platform,
+					Provider:      marketplaceProviderName(supportedModel.Platform),
+					Pricing:       toUserPricing(supportedModel.Pricing),
+					Groups:        make([]modelMarketplaceGroup, 0, len(groups)),
+					pricingSource: supportedModel.PricingSource,
+				}
+				models[key] = model
+				groupIndexes[key] = make(map[int64]struct{}, len(groups))
+			} else if pricingSourcePriority(supportedModel.PricingSource) > pricingSourcePriority(model.pricingSource) {
+				model.Pricing = toUserPricing(supportedModel.Pricing)
+				model.pricingSource = supportedModel.PricingSource
+			}
+
+			for _, group := range groups {
+				if _, exists := groupIndexes[key][group.ID]; exists {
+					continue
+				}
+				groupIndexes[key][group.ID] = struct{}{}
+				model.Groups = append(model.Groups, modelMarketplaceGroup{
+					ID:             group.ID,
+					Name:           group.Name,
+					Platform:       group.Platform,
+					RateMultiplier: group.RateMultiplier,
+				})
+			}
+		}
+	}
+
+	result := make([]modelMarketplaceModel, 0, len(models))
+	for _, model := range models {
+		sort.SliceStable(model.Groups, func(i, j int) bool {
+			return model.Groups[i].Name < model.Groups[j].Name
+		})
+		result = append(result, *model)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Provider != result[j].Provider {
+			return result[i].Provider < result[j].Provider
+		}
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+	return result
+}
+
+func pricingSourcePriority(source service.SupportedModelPricingSource) int {
+	switch source {
+	case service.SupportedModelPricingSourceChannel:
+		return 2
+	case service.SupportedModelPricingSourceCatalog:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func marketplaceProviderName(platform string) string {
+	switch strings.ToLower(platform) {
+	case "openai":
+		return "OpenAI"
+	case "anthropic":
+		return "Anthropic"
+	case "gemini", "google":
+		return "Google"
+	case "xai":
+		return "xAI"
+	case "mistral":
+		return "Mistral AI"
+	case "cohere":
+		return "Cohere"
+	case "deepseek":
+		return "DeepSeek"
+	case "qwen", "dashscope":
+		return "Qwen"
+	default:
+		return platform
+	}
 }
 
 // buildPlatformSections 把一个渠道按 visibleGroups 的平台集合拆成有序的 section 列表：

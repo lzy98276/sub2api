@@ -155,3 +155,83 @@ func TestBuildPlatformSections_GroupsByPlatform(t *testing.T) {
 	require.Len(t, sections[0].SupportedModels, 1)
 	require.Equal(t, "claude-sonnet-4-6", sections[0].SupportedModels[0].Name)
 }
+
+func TestBuildModelMarketplaceModels_AggregatesGroupsAndPreservesPricing(t *testing.T) {
+	customInput := 0.000003
+	customOutput := 0.000015
+	channels := []service.AvailableChannel{
+		{
+			Name:   "active-channel",
+			Status: service.StatusActive,
+			Groups: []service.AvailableGroupRef{
+				{ID: 1, Name: "claude-standard", Platform: "anthropic", RateMultiplier: 1},
+				{ID: 2, Name: "claude-pro", Platform: "anthropic", RateMultiplier: 1.3},
+				{ID: 3, Name: "gpt", Platform: "openai"},
+			},
+			SupportedModels: []service.SupportedModel{
+				{
+					Name:          "claude-sonnet-4-6",
+					Platform:      "anthropic",
+					PricingSource: service.SupportedModelPricingSourceChannel,
+					Pricing: &service.ChannelModelPricing{
+						BillingMode: service.BillingModeToken,
+						InputPrice:  &customInput,
+						OutputPrice: &customOutput,
+					},
+				},
+				{Name: "gpt-5", Platform: "openai"},
+			},
+		},
+		{
+			Name:   "inactive-channel",
+			Status: "inactive",
+			Groups: []service.AvailableGroupRef{{ID: 1, Name: "claude-standard", Platform: "anthropic"}},
+			SupportedModels: []service.SupportedModel{
+				{Name: "should-not-appear", Platform: "anthropic"},
+			},
+		},
+	}
+
+	models := buildModelMarketplaceModels(channels, map[int64]struct{}{1: {}, 2: {}}, map[int64]float64{2: 1.2})
+	require.Len(t, models, 1)
+	require.Equal(t, "claude-sonnet-4-6", models[0].Name)
+	require.Equal(t, "Anthropic", models[0].Provider)
+	require.Len(t, models[0].Groups, 2)
+	require.Equal(t, "claude-pro", models[0].Groups[0].Name)
+	require.Equal(t, "claude-standard", models[0].Groups[1].Name)
+	require.Equal(t, 1.2, models[0].Groups[0].RateMultiplier)
+	require.NotNil(t, models[0].Pricing)
+	require.NotNil(t, models[0].Pricing.InputPrice)
+	require.Equal(t, customInput, *models[0].Pricing.InputPrice)
+}
+
+func TestBuildModelMarketplaceModels_PrefersChannelPriceOverCatalogFallback(t *testing.T) {
+	catalogInput := 0.000001
+	channelInput := 0.000003
+	channels := []service.AvailableChannel{
+		{
+			Name:   "a-catalog",
+			Status: service.StatusActive,
+			Groups: []service.AvailableGroupRef{{ID: 1, Name: "openai", Platform: "openai", RateMultiplier: 1}},
+			SupportedModels: []service.SupportedModel{{
+				Name: "gpt-5", Platform: "openai", PricingSource: service.SupportedModelPricingSourceCatalog,
+				Pricing: &service.ChannelModelPricing{InputPrice: &catalogInput},
+			}},
+		},
+		{
+			Name:   "b-custom",
+			Status: service.StatusActive,
+			Groups: []service.AvailableGroupRef{{ID: 2, Name: "openai-pro", Platform: "openai", RateMultiplier: 1.1}},
+			SupportedModels: []service.SupportedModel{{
+				Name: "gpt-5", Platform: "openai", PricingSource: service.SupportedModelPricingSourceChannel,
+				Pricing: &service.ChannelModelPricing{InputPrice: &channelInput},
+			}},
+		},
+	}
+
+	models := buildModelMarketplaceModels(channels, map[int64]struct{}{1: {}, 2: {}}, nil)
+	require.Len(t, models, 1)
+	require.NotNil(t, models[0].Pricing)
+	require.NotNil(t, models[0].Pricing.InputPrice)
+	require.Equal(t, channelInput, *models[0].Pricing.InputPrice)
+}
