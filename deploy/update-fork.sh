@@ -85,7 +85,7 @@ fi
 
 echo "Creating database and application-data backups in $BACKUP_DIR"
 docker exec "$POSTGRES_CONTAINER" sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip -c > "$BACKUP_DIR/database.sql.gz"
-tar -C "$DEPLOY_DIR" -czf "$BACKUP_DIR/application-and-redis-data.tgz" data redis_data
+tar -C "$DEPLOY_DIR" --exclude='data/logs' -czf "$BACKUP_DIR/application-and-redis-data.tgz" data redis_data
 sha256sum "$BACKUP_DIR/database.sql.gz" "$BACKUP_DIR/application-and-redis-data.tgz" > "$BACKUP_DIR/SHA256SUMS"
 
 WORK_DIR="$(mktemp -d /root/.sub2api-fork-build.XXXXXX)"
