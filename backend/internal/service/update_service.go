@@ -365,7 +365,12 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 // fetchRollbackCandidates fetches recent releases and keeps the newest
 // maxRollbackVersions entries strictly older than the current version.
 func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubRelease, error) {
-	releases, err := s.githubClient.FetchRecentReleases(ctx, githubRepo, rollbackFetchPageSize)
+	repository, err := resolveUpdateRepository()
+	if err != nil {
+		return nil, err
+	}
+
+	releases, err := s.githubClient.FetchRecentReleases(ctx, repository, rollbackFetchPageSize)
 	if err != nil {
 		return nil, err
 	}

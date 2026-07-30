@@ -14,7 +14,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -270,7 +269,7 @@ func (a *Account) IsGrokOAuth() bool {
 }
 
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok)
+	return a != nil && (a.IsOpenAI() || a.IsGrok() || a.IsXAI())
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1231,12 +1230,20 @@ func (a *Account) IsOpenAI() bool {
 	return a.Platform == PlatformOpenAI
 }
 
-func (a *Account) IsXAI() bool {
-	return a.Platform == PlatformXAI
+func (a *Account) IsOpenAILongContextBillingEnabled() bool {
+	if a == nil || !a.IsOpenAI() {
+		return false
+	}
+	raw, exists := a.Extra[openAILongContextBillingEnabledKey]
+	if !exists {
+		return true
+	}
+	enabled, ok := raw.(bool)
+	return ok && enabled
 }
 
-func (a *Account) IsOpenAICompatible() bool {
-	return a.IsOpenAI() || a.IsXAI()
+func (a *Account) IsXAI() bool {
+	return a.Platform == PlatformXAI
 }
 
 func (a *Account) IsAnthropic() bool {
